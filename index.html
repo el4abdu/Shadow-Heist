@@ -184,15 +184,44 @@
         </div>
     </div>
 
+    <!-- Error overlay for connection issues -->
+    <div id="error-overlay" class="error-overlay">
+        <div class="error-content">
+            <i class="fas fa-exclamation-triangle error-icon"></i>
+            <h3>خطأ في الاتصال</h3>
+            <p id="error-message">يتعذر الاتصال بالخادم. نحاول إعادة الاتصال...</p>
+            <div class="loading-spinner">
+                <div class="spinner"></div>
+            </div>
+            <button id="manual-reconnect" class="btn primary-btn">
+                <i class="fas fa-sync-alt"></i> إعادة الاتصال
+            </button>
+            <button id="offline-mode-btn" class="btn secondary-btn">
+                <i class="fas fa-user"></i> وضع اللاعب الواحد
+            </button>
+        </div>
+    </div>
+
     <!-- Notification toast container -->
     <div id="toast-container" class="toast-container"></div>
 
     <!-- Scripts -->
-    <script src="https://cdn.socket.io/4.6.0/socket.io.min.js"></script>
+    <script src="https://cdn.socket.io/4.6.0/socket.io.min.js" onerror="handleSocketLibError()"></script>
     <script src="js/game.js"></script>
     <script src="js/tasks.js"></script>
     <script src="js/ui.js"></script>
     <script>
+        // Handle Socket.io library loading error
+        function handleSocketLibError() {
+            console.error('Failed to load Socket.io library');
+            const errorOverlay = document.getElementById('error-overlay');
+            if (errorOverlay) {
+                document.getElementById('error-message').textContent = 
+                    'فشل تحميل مكتبة Socket.io. قد يكون سبب ذلك اتصال الإنترنت أو حاجب الإعلانات.';
+                errorOverlay.classList.add('active');
+            }
+        }
+
         // Register service worker for PWA
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
@@ -204,6 +233,25 @@
         
         // Initialize game on load
         document.addEventListener('DOMContentLoaded', () => {
+            // Setup error overlay buttons
+            const manualReconnect = document.getElementById('manual-reconnect');
+            if (manualReconnect) {
+                manualReconnect.addEventListener('click', () => {
+                    location.reload();
+                });
+            }
+            
+            const offlineModeBtn = document.getElementById('offline-mode-btn');
+            if (offlineModeBtn) {
+                offlineModeBtn.addEventListener('click', () => {
+                    const errorOverlay = document.getElementById('error-overlay');
+                    if (errorOverlay) errorOverlay.classList.remove('active');
+                    
+                    const playerName = document.getElementById('player-name').value.trim() || 'Player';
+                    window.startOfflineMode(playerName);
+                });
+            }
+            
             init();
             
             // How to play button

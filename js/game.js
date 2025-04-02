@@ -66,7 +66,8 @@ let gameState = {
     votingResults: {},
     messages: [],
     gameOver: false,
-    winner: null
+    winner: null,
+    offline: false
 };
 
 // Socket connection
@@ -124,6 +125,10 @@ function init() {
 // Connect to Socket.io server
 function connectToServer() {
     try {
+        // Hide error overlay if visible
+        const errorOverlay = document.getElementById('error-overlay');
+        if (errorOverlay) errorOverlay.classList.remove('active');
+        
         // Determine server URL based on environment
         let serverUrl = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' 
             ? 'http://localhost:3000'  // Local development
@@ -137,9 +142,12 @@ function connectToServer() {
                 ? '/' // Local development
                 : '/.netlify/functions/socket-server', // Production (Netlify serverless function)
             reconnection: true,
-            reconnectionAttempts: 5,
-            reconnectionDelay: 1000,
-            timeout: 10000
+            reconnectionAttempts: 10,
+            reconnectionDelay: 2000,
+            timeout: 20000,
+            forceNew: true,
+            transports: ['websocket', 'polling'],
+            rejectUnauthorized: false
         });
         
         // Add connection status handlers
@@ -148,39 +156,237 @@ function connectToServer() {
         socket.on('disconnect', handleSocketDisconnect);
         socket.on('reconnect_attempt', (attempt) => {
             console.log(`Reconnection attempt ${attempt}`);
-            UI.showToast(`Reconnection attempt ${attempt}/5...`, 'warning');
+            UI.showToast(`محاولة إعادة الاتصال ${attempt}/10...`, 'warning');
+            if (window.updateConnectionStatus) {
+                window.updateConnectionStatus('connecting');
+            }
         });
         socket.on('reconnect', () => {
             console.log('Reconnected to server');
-            UI.showToast('Reconnected to server!', 'success');
+            UI.showToast('تم إعادة الاتصال بالخادم!', 'success');
+            if (window.updateConnectionStatus) {
+                window.updateConnectionStatus('connected');
+            }
+            
+            // Hide error overlay if visible
+            if (errorOverlay) errorOverlay.classList.remove('active');
         });
         socket.on('reconnect_failed', () => {
             console.log('Failed to reconnect');
-            UI.showToast('Failed to connect. Please refresh the page.', 'error');
+            UI.showToast('فشل الاتصال. يرجى تحديث الصفحة.', 'error');
+            
+            // Show error overlay
+            if (errorOverlay) {
+                document.getElementById('error-message').textContent = 
+                    'فشلت جميع محاولات إعادة الاتصال بالخادم. يرجى التحقق من اتصال الإنترنت الخاص بك.';
+                errorOverlay.classList.add('active');
+            }
         });
         
         // Set up other Socket event listeners
         setupSocketListeners();
     } catch (error) {
         console.error('Error in connectToServer:', error);
-        UI.showToast('Connection setup error. Please refresh the page.', 'error');
+        UI.showToast('خطأ في إعداد الاتصال. يرجى تحديث الصفحة.', 'error');
+        
+        // Show error overlay
+        const errorOverlay = document.getElementById('error-overlay');
+        if (errorOverlay) {
+            document.getElementById('error-message').textContent = 
+                'حدث خطأ أثناء محاولة الاتصال بالخادم: ' + error.message;
+            errorOverlay.classList.add('active');
+        }
     }
+}
+
+// Handle create game with fallback to offline mode
+function createGame() {
+    try {
+        const playerName = elements.playerName.value.trim();
+        if (!playerName) {
+            showModal('خطأ', '<p>الرجاء إدخال اسم</p>');
+            return;
+        }
+        
+        // Show loading indicator
+        UI.showToast('جاري إنشاء لعبة جديدة...', 'info');
+        console.log('Creating new game with name:', playerName);
+        
+        // Add visible spinner to the button
+        const originalBtnText = elements.createGameBtn.innerHTML;
+        elements.createGameBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جاري الإنشاء...';
+        elements.createGameBtn.disabled = true;
+        
+        // Check connection status before trying
+        if (!socket.connected) {
+            console.log('Socket not connected, attempting reconnect before creating game');
+            socket.connect(); // Force reconnect attempt
+        }
+        
+        // Emit create room event with timeout handling and error handling
+        const timeoutId = setTimeout(() => {
+            UI.showToast('تجاوز الوقت المحدد لاستجابة الخادم. سيتم محاولة إنشاء اللعبة محليًا.', 'warning');
+            elements.createGameBtn.innerHTML = originalBtnText;
+            elements.createGameBtn.disabled = false;
+            
+            // Offer offline mode as fallback
+            offerOfflineMode(playerName);
+        }, 8000);
+        
+        socket.emit('createRoom', { playerName }, (response) => {
+            clearTimeout(timeoutId);
+            elements.createGameBtn.innerHTML = originalBtnText;
+            elements.createGameBtn.disabled = false;
+            
+            if (response && response.success) {
+                console.log('Room created successfully');
+            } else {
+                console.error('Failed to create room:', response ? response.error : 'No response');
+                UI.showToast('فشل إنشاء الغرفة. ' + (response ? response.error : 'حاول مرة أخرى.'), 'error');
+                offerOfflineMode(playerName);
+            }
+        });
+    } catch (error) {
+        console.error('Error in createGame:', error);
+        UI.showToast('فشل إنشاء اللعبة. حاول مرة أخرى.', 'error');
+        offerOfflineMode(playerName);
+    }
+}
+
+// Offer offline single player mode
+function offerOfflineMode(playerName) {
+    showModal('مشكلة في الاتصال', `
+        <p>يبدو أنه يوجد مشكلة في الاتصال بالخادم.</p>
+        <p>هل ترغب في اللعب في وضع عدم الاتصال (اللاعب الواحد)؟</p>
+        <div class="modal-actions">
+            <button id="start-offline-btn" class="btn primary-btn">وضع عدم الاتصال</button>
+            <button id="retry-connection-btn" class="btn secondary-btn">إعادة المحاولة</button>
+        </div>
+    `);
+    
+    document.getElementById('start-offline-btn').addEventListener('click', () => {
+        startOfflineMode(playerName);
+        closeModal();
+    });
+    
+    document.getElementById('retry-connection-btn').addEventListener('click', () => {
+        closeModal();
+        socket.connect(); // Try to reconnect
+        setTimeout(() => createGame(), 1000); // Try again after reconnection attempt
+    });
+}
+
+// Start offline mode - make globally available
+window.startOfflineMode = function(playerName) {
+    // Create mock game state for single player
+    gameState.offline = true;
+    gameState.roomId = 'OFFLINE';
+    gameState.players = [
+        { id: 'player', name: playerName, isHost: true, role: 'masterThief' },
+        { id: 'ai1', name: 'AI Player 1', isHost: false, role: 'civilian1' },
+        { id: 'ai2', name: 'AI Player 2', isHost: false, role: 'civilian2' },
+        { id: 'ai3', name: 'AI Player 3', isHost: false, role: 'infiltrator' }
+    ];
+    
+    // Show lobby with AI players
+    showScreen('lobby');
+    elements.roomCode.textContent = 'OFFLINE';
+    updatePlayersList(gameState.players);
+    elements.startGameBtn.style.display = 'block';
+    
+    // Add an info message
+    UI.showToast('تم بدء وضع عدم الاتصال. اضغط على "START HEIST" للعب ضد الذكاء الاصطناعي.', 'info', 10000);
+    
+    // Setup offline mode event handlers
+    setupOfflineMode();
+}
+
+// Setup offline mode game mechanics
+function setupOfflineMode() {
+    // Override start game for offline mode
+    const originalStartGame = startGame;
+    startGame = function() {
+        if (!gameState.offline) {
+            return originalStartGame();
+        }
+        
+        // Offline mode start game
+        showScreen('game');
+        gameState.phase = 'prep';
+        
+        // Assign roles (already done in startOfflineMode)
+        UI.showToast('بدأت اللعبة في وضع عدم الاتصال!', 'success');
+        
+        // Send role assigned event locally
+        handleRoleAssigned({ 
+            role: 'masterThief',
+            extraInfo: 'أنت تلعب في وضع عدم الاتصال ضد الذكاء الاصطناعي.'
+        });
+        
+        // Start first phase
+        setTimeout(() => {
+            handlePhaseChanged({ 
+                phase: 'night', 
+                timeLeft: GAME_CONFIG.timeouts.night
+            });
+            
+            // Simulate AI chat message
+            setTimeout(() => {
+                handleChatMessage({
+                    id: 'system',
+                    player: 'System',
+                    senderId: 'system',
+                    message: 'مرحبًا بك في وضع عدم الاتصال للعبة Shadow Heist!',
+                    timestamp: Date.now(),
+                    type: 'system'
+                });
+            }, 2000);
+            
+            // Simulate AI player chat
+            setTimeout(() => {
+                handleChatMessage({
+                    id: 'ai1',
+                    player: 'AI Player 1',
+                    senderId: 'ai1',
+                    message: 'مرحبًا! هيا نبدأ المهمة!',
+                    timestamp: Date.now(),
+                    role: 'civilian1'
+                });
+            }, 4000);
+        }, 3000);
+    };
 }
 
 // Handle socket connection
 function handleSocketConnect() {
     console.log('Connected to server');
-    UI.showToast('Connected to server', 'success');
+    UI.showToast('تم الاتصال بالخادم', 'success');
     
     // Update connection status UI
     if (window.updateConnectionStatus) {
         window.updateConnectionStatus('connected');
     }
     
+    // Re-enable buttons
+    if (elements.createGameBtn) {
+        elements.createGameBtn.disabled = false;
+        elements.createGameBtn.innerHTML = 'CREATE NEW HEIST';
+    }
+    
     // Check if reconnecting with active game
-    if (gameState.roomId) {
-        // TODO: Implement reconnection logic
-        console.log('Reconnecting to room:', gameState.roomId);
+    if (gameState.roomId && !gameState.offline) {
+        // Implement reconnection to active game
+        socket.emit('rejoinRoom', { 
+            roomId: gameState.roomId,
+            playerId: socket.id 
+        }, (response) => {
+            if (response && response.success) {
+                UI.showToast('تم إعادة الاتصال باللعبة!', 'success');
+            } else {
+                UI.showToast('تعذر إعادة الاتصال باللعبة السابقة.', 'error');
+                showScreen('welcome');
+            }
+        });
     }
 }
 
@@ -194,15 +400,16 @@ function handleSocketError(error) {
         window.updateConnectionStatus('disconnected');
     }
     
-    // Show detailed error in modal for debugging
-    showModal('Connection Error', `
-        <p>There was an error connecting to the game server.</p>
-        <p>Error details: ${error.message || error}</p>
-        <p>Please try refreshing the page if the problem persists.</p>
-        <div class="modal-actions">
-            <button onclick="location.reload()" class="btn primary-btn">Refresh Page</button>
-        </div>
-    `);
+    // Show error overlay after multiple failures
+    if (socket && socket.io && socket.io.reconnectionAttempts && 
+        socket.io._reconnectionAttempts > 3) {
+        const errorOverlay = document.getElementById('error-overlay');
+        if (errorOverlay && !errorOverlay.classList.contains('active')) {
+            document.getElementById('error-message').textContent = 
+                'يواجه الخادم مشكلة. نحاول إعادة الاتصال تلقائيًا.';
+            errorOverlay.classList.add('active');
+        }
+    }
 }
 
 // Handle socket disconnection
@@ -672,32 +879,6 @@ function joinGame() {
     if (!roomId) return;
     
     socket.emit('joinRoom', { playerName, roomId });
-}
-
-function createGame() {
-    try {
-        const playerName = elements.playerName.value.trim();
-        if (!playerName) {
-            showModal('Error', '<p>Please enter a name</p>');
-            return;
-        }
-        
-        // Show loading indicator
-        UI.showToast('Creating new heist...', 'info');
-        console.log('Creating new game with name:', playerName);
-        
-        // Emit create room event with timeout handling
-        const timeout = setTimeout(() => {
-            UI.showToast('Server response timeout. Please try again.', 'error');
-        }, 5000);
-        
-        socket.emit('createRoom', { playerName }, () => {
-            clearTimeout(timeout); // Clear timeout if server responds
-        });
-    } catch (error) {
-        console.error('Error in createGame:', error);
-        UI.showToast('Failed to create game. Please try again.', 'error');
-    }
 }
 
 function startGame() {
