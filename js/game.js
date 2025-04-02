@@ -123,31 +123,59 @@ function init() {
 
 // Connect to Socket.io server
 function connectToServer() {
-    // Determine server URL based on environment
-    let serverUrl = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' 
-        ? 'http://localhost:3000'  // Local development
-        : window.location.origin;  // Production (Netlify)
-    
-    // Connect to Socket.io
-    socket = io(serverUrl, {
-        path: window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-            ? '/' // Local development
-            : '/.netlify/functions/socket-server' // Production (Netlify serverless function)
-    });
-    
-    // Add connection status handlers
-    socket.on('connect', handleSocketConnect);
-    socket.on('connect_error', handleSocketError);
-    socket.on('disconnect', handleSocketDisconnect);
-    
-    // Set up other Socket event listeners
-    setupSocketListeners();
+    try {
+        // Determine server URL based on environment
+        let serverUrl = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' 
+            ? 'http://localhost:3000'  // Local development
+            : window.location.origin;  // Production (Netlify)
+        
+        console.log('Connecting to server:', serverUrl);
+        
+        // Connect to Socket.io with more robust options
+        socket = io(serverUrl, {
+            path: window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+                ? '/' // Local development
+                : '/.netlify/functions/socket-server', // Production (Netlify serverless function)
+            reconnection: true,
+            reconnectionAttempts: 5,
+            reconnectionDelay: 1000,
+            timeout: 10000
+        });
+        
+        // Add connection status handlers
+        socket.on('connect', handleSocketConnect);
+        socket.on('connect_error', handleSocketError);
+        socket.on('disconnect', handleSocketDisconnect);
+        socket.on('reconnect_attempt', (attempt) => {
+            console.log(`Reconnection attempt ${attempt}`);
+            UI.showToast(`Reconnection attempt ${attempt}/5...`, 'warning');
+        });
+        socket.on('reconnect', () => {
+            console.log('Reconnected to server');
+            UI.showToast('Reconnected to server!', 'success');
+        });
+        socket.on('reconnect_failed', () => {
+            console.log('Failed to reconnect');
+            UI.showToast('Failed to connect. Please refresh the page.', 'error');
+        });
+        
+        // Set up other Socket event listeners
+        setupSocketListeners();
+    } catch (error) {
+        console.error('Error in connectToServer:', error);
+        UI.showToast('Connection setup error. Please refresh the page.', 'error');
+    }
 }
 
 // Handle socket connection
 function handleSocketConnect() {
     console.log('Connected to server');
     UI.showToast('Connected to server', 'success');
+    
+    // Update connection status UI
+    if (window.updateConnectionStatus) {
+        window.updateConnectionStatus('connected');
+    }
     
     // Check if reconnecting with active game
     if (gameState.roomId) {
@@ -160,12 +188,32 @@ function handleSocketConnect() {
 function handleSocketError(error) {
     console.error('Socket connection error:', error);
     UI.showToast('Connection error. Retrying...', 'error');
+    
+    // Update connection status UI
+    if (window.updateConnectionStatus) {
+        window.updateConnectionStatus('disconnected');
+    }
+    
+    // Show detailed error in modal for debugging
+    showModal('Connection Error', `
+        <p>There was an error connecting to the game server.</p>
+        <p>Error details: ${error.message || error}</p>
+        <p>Please try refreshing the page if the problem persists.</p>
+        <div class="modal-actions">
+            <button onclick="location.reload()" class="btn primary-btn">Refresh Page</button>
+        </div>
+    `);
 }
 
 // Handle socket disconnection
 function handleSocketDisconnect(reason) {
     console.log('Disconnected from server:', reason);
     UI.showToast('Disconnected from server. Trying to reconnect...', 'warning');
+    
+    // Update connection status UI
+    if (window.updateConnectionStatus) {
+        window.updateConnectionStatus('disconnected');
+    }
 }
 
 // Socket event listeners
@@ -224,6 +272,9 @@ function handleRoomCreated(data) {
     
     // Only show start button to host
     elements.startGameBtn.style.display = socket.id === data.hostId ? 'block' : 'none';
+    
+    // Load chat history
+    loadChatHistory();
 }
 
 function handleJoinedRoom(data) {
@@ -234,6 +285,9 @@ function handleJoinedRoom(data) {
     
     // Only show start button to host
     elements.startGameBtn.style.display = socket.id === data.hostId ? 'block' : 'none';
+    
+    // Load chat history
+    loadChatHistory();
 }
 
 function handlePlayerJoined(data) {
@@ -299,13 +353,67 @@ function handleTaskUpdate(data) {
 }
 
 function handleChatMessage(data) {
-    const messageElement = document.createElement('div');
-    messageElement.className = 'chat-message';
-    messageElement.innerHTML = `<strong>${data.player}:</strong> ${data.message}`;
-    elements.chatMessages.appendChild(messageElement);
-    
-    // Auto-scroll to bottom
-    elements.chatMessages.scrollTop = elements.chatMessages.scrollHeight;
+    try {
+        // Create message element with timestamp
+        const messageElement = document.createElement('div');
+        messageElement.className = 'chat-message';
+        
+        // Format timestamp
+        const timestamp = new Date(data.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        
+        // Handle different message types
+        if (data.type === 'system') {
+            // System message styling
+            messageElement.classList.add('system-message');
+            messageElement.innerHTML = `
+                <div class="message-content system-content">${data.message}</div>
+                <div class="message-time">${timestamp}</div>
+            `;
+        } else {
+            // Different styling for own messages vs others
+            const isOwnMessage = data.senderId === socket.id;
+            messageElement.classList.add(isOwnMessage ? 'own-message' : 'other-message');
+            
+            // Add role information for special styling based on player role
+            if (data.role) {
+                messageElement.dataset.role = data.role;
+            }
+            
+            // HTML for the message
+            messageElement.innerHTML = `
+                <div class="message-header">
+                    <span class="message-sender">${data.player}</span>
+                    <span class="message-time">${timestamp}</span>
+                </div>
+                <div class="message-content">${data.message}</div>
+            `;
+        }
+        
+        // Add to chat container
+        elements.chatMessages.appendChild(messageElement);
+        
+        // Auto-scroll to bottom
+        elements.chatMessages.scrollTop = elements.chatMessages.scrollHeight;
+        
+        // If in a different screen, show notification toast
+        if (!screens.meeting.classList.contains('active')) {
+            // Don't notify for own messages
+            if (data.senderId !== socket.id) {
+                UI.showToast(`New message from ${data.player}`, 'info');
+            }
+        }
+        
+        // Store in local message history
+        if (!gameState.messages) gameState.messages = [];
+        gameState.messages.push(data);
+        
+        // Limit local history to avoid memory issues
+        if (gameState.messages.length > 100) {
+            gameState.messages = gameState.messages.slice(-100);
+        }
+    } catch (error) {
+        console.error('Error handling chat message:', error);
+    }
 }
 
 function handleVoteUpdate(data) {
@@ -567,13 +675,29 @@ function joinGame() {
 }
 
 function createGame() {
-    const playerName = elements.playerName.value.trim();
-    if (!playerName) {
-        showModal('Error', '<p>Please enter a name</p>');
-        return;
+    try {
+        const playerName = elements.playerName.value.trim();
+        if (!playerName) {
+            showModal('Error', '<p>Please enter a name</p>');
+            return;
+        }
+        
+        // Show loading indicator
+        UI.showToast('Creating new heist...', 'info');
+        console.log('Creating new game with name:', playerName);
+        
+        // Emit create room event with timeout handling
+        const timeout = setTimeout(() => {
+            UI.showToast('Server response timeout. Please try again.', 'error');
+        }, 5000);
+        
+        socket.emit('createRoom', { playerName }, () => {
+            clearTimeout(timeout); // Clear timeout if server responds
+        });
+    } catch (error) {
+        console.error('Error in createGame:', error);
+        UI.showToast('Failed to create game. Please try again.', 'error');
     }
-    
-    socket.emit('createRoom', { playerName });
 }
 
 function startGame() {
@@ -625,11 +749,31 @@ function callMeeting() {
 }
 
 function sendChatMessage() {
-    const message = elements.chatInput.value.trim();
-    if (!message) return;
-    
-    socket.emit('sendMessage', { roomId: gameState.roomId, message });
-    elements.chatInput.value = '';
+    try {
+        const message = elements.chatInput.value.trim();
+        if (!message) return;
+        
+        const messageData = {
+            roomId: gameState.roomId,
+            message,
+            timestamp: Date.now(),
+            senderId: socket.id
+        };
+        
+        // Add optimistic local message immediately
+        const playerName = gameState.players.find(p => p.id === socket.id)?.name || 'You';
+        handleChatMessage({
+            player: playerName,
+            message,
+            senderId: socket.id
+        });
+        
+        socket.emit('sendMessage', messageData);
+        elements.chatInput.value = '';
+    } catch (error) {
+        console.error('Error sending chat message:', error);
+        UI.showToast('Failed to send message. Please try again.', 'error');
+    }
 }
 
 function voteForPlayer(playerId) {
@@ -736,6 +880,23 @@ function isHero() {
 function isCivilian() {
     const role = gameState.playerRole;
     return GAME_CONFIG.roles[role].type === 'civilian';
+}
+
+// Load chat history when joining a room
+function loadChatHistory() {
+    if (!gameState.roomId) return;
+    
+    socket.emit('getChatHistory', { roomId: gameState.roomId }, (chatHistory) => {
+        if (!chatHistory || !chatHistory.length) return;
+        
+        // Clear existing messages
+        elements.chatMessages.innerHTML = '';
+        
+        // Add chat messages
+        chatHistory.forEach(message => {
+            handleChatMessage(message);
+        });
+    });
 }
 
 // Initialize the game when the page loads

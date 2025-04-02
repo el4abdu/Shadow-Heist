@@ -86,49 +86,58 @@ exports.handler = async function(event, context) {
         console.log(`User connected: ${socket.id}`);
         
         // Create room
-        socket.on('createRoom', ({ playerName }) => {
-            // Generate room code
-            const roomId = generateRoomCode();
-            
-            // Create player object
-            const player = {
-                id: socket.id,
-                name: playerName,
-                isHost: true,
-                isReady: false,
-                role: null,
-                room: 'entrance',
-                color: getRandomColor()
-            };
-            
-            // Create room
-            gameRooms.set(roomId, {
-                id: roomId,
-                hostId: socket.id,
-                players: [player],
-                phase: GamePhase.LOBBY,
-                tasks: {
-                    total: 3,
-                    completed: 0,
-                    sabotaged: 0,
-                    list: selectRandomTasks(3)
-                },
-                votes: {},
-                gameTimer: null,
-                phaseEndTime: null
-            });
-            
-            // Join the room
-            socket.join(roomId);
-            
-            // Send room created event
-            socket.emit('roomCreated', {
-                roomId,
-                hostId: socket.id,
-                players: [player]
-            });
-            
-            console.log(`Room created: ${roomId} by ${playerName}`);
+        socket.on('createRoom', ({ playerName }, callback) => {
+            try {
+                // Generate room code
+                const roomId = generateRoomCode();
+                
+                // Create player object
+                const player = {
+                    id: socket.id,
+                    name: playerName,
+                    isHost: true,
+                    isReady: false,
+                    role: null,
+                    room: 'entrance',
+                    color: getRandomColor()
+                };
+                
+                // Create room
+                gameRooms.set(roomId, {
+                    id: roomId,
+                    hostId: socket.id,
+                    players: [player],
+                    phase: GamePhase.LOBBY,
+                    tasks: {
+                        total: 3,
+                        completed: 0,
+                        sabotaged: 0,
+                        list: selectRandomTasks(3)
+                    },
+                    votes: {},
+                    chatHistory: [], // Add chat history storage
+                    gameTimer: null,
+                    phaseEndTime: null
+                });
+                
+                // Join the room
+                socket.join(roomId);
+                
+                // Send room created event
+                socket.emit('roomCreated', {
+                    roomId,
+                    hostId: socket.id,
+                    players: [player]
+                });
+                
+                console.log(`Room created: ${roomId} by ${playerName}`);
+                
+                // Call the callback to confirm success
+                if (typeof callback === 'function') callback({ success: true });
+            } catch (error) {
+                console.error('Error creating room:', error);
+                if (typeof callback === 'function') callback({ success: false, error: error.message });
+            }
         });
         
         // Join room
@@ -233,8 +242,65 @@ exports.handler = async function(event, context) {
             console.log(`Game started in room ${roomId}`);
         });
 
-        // Include all socket handlers from the server.js file
-        // (simplified for brevity in this example)
+        // Enhanced message handling
+        socket.on('sendMessage', (data) => {
+            const { roomId, message, timestamp, senderId } = data;
+            
+            // Check if room exists
+            if (!gameRooms.has(roomId)) {
+                socket.emit('error', { message: 'Room does not exist' });
+                return;
+            }
+            
+            const room = gameRooms.get(roomId);
+            
+            // Find player
+            const player = room.players.find(p => p.id === socket.id);
+            if (!player) {
+                socket.emit('error', { message: 'Player not found in room' });
+                return;
+            }
+            
+            // Create message object
+            const messageObj = {
+                id: uuidv4(),
+                player: player.name,
+                senderId: socket.id,
+                message,
+                timestamp: timestamp || Date.now(),
+                role: player.role // Include role for potential special formatting
+            };
+            
+            // Store in chat history
+            if (!room.chatHistory) room.chatHistory = [];
+            room.chatHistory.push(messageObj);
+            
+            // Limit history to 100 messages
+            if (room.chatHistory.length > 100) {
+                room.chatHistory = room.chatHistory.slice(-100);
+            }
+            
+            // Broadcast message to all players in the room
+            ioServer.to(roomId).emit('chatMessage', messageObj);
+        });
+        
+        // Get chat history
+        socket.on('getChatHistory', ({ roomId }, callback) => {
+            // Check if room exists
+            if (!gameRooms.has(roomId)) {
+                socket.emit('error', { message: 'Room does not exist' });
+                return;
+            }
+            
+            const room = gameRooms.get(roomId);
+            
+            // Return chat history
+            if (typeof callback === 'function') {
+                callback(room.chatHistory || []);
+            } else {
+                socket.emit('chatHistory', room.chatHistory || []);
+            }
+        });
         
         // Disconnect
         socket.on('disconnect', () => {
@@ -244,8 +310,52 @@ exports.handler = async function(event, context) {
             gameRooms.forEach((room, roomId) => {
                 const playerIndex = room.players.findIndex(p => p.id === socket.id);
                 if (playerIndex !== -1) {
-                    // Handle as if player left room
-                    socket.emit('leaveRoom', { roomId });
+                    const player = room.players[playerIndex];
+                    
+                    // Remove player from room
+                    room.players.splice(playerIndex, 1);
+                    
+                    // Notify other players
+                    socket.to(roomId).emit('playerLeft', {
+                        players: room.players,
+                        leftPlayer: player.name
+                    });
+                    
+                    // Add system message to chat
+                    const systemMessage = {
+                        id: uuidv4(),
+                        player: 'System',
+                        senderId: 'system',
+                        message: `${player.name} has left the heist.`,
+                        timestamp: Date.now(),
+                        type: 'system'
+                    };
+                    
+                    if (!room.chatHistory) room.chatHistory = [];
+                    room.chatHistory.push(systemMessage);
+                    
+                    // Broadcast system message
+                    ioServer.to(roomId).emit('chatMessage', systemMessage);
+                    
+                    // If room is empty, delete it
+                    if (room.players.length === 0) {
+                        gameRooms.delete(roomId);
+                        console.log(`Room deleted: ${roomId}`);
+                    }
+                    // If host left, assign new host
+                    else if (socket.id === room.hostId) {
+                        room.hostId = room.players[0].id;
+                        room.players[0].isHost = true;
+                        
+                        // Notify new host
+                        ioServer.to(room.hostId).emit('becameHost');
+                        
+                        // Notify all players of new host
+                        ioServer.to(roomId).emit('newHost', {
+                            hostId: room.hostId,
+                            hostName: room.players[0].name
+                        });
+                    }
                 }
             });
         });

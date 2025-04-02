@@ -16,6 +16,12 @@
 </head>
 <body>
     <div class="container">
+        <!-- Connection status indicator -->
+        <div id="connection-status" class="connection-status connecting">
+            <div class="status-dot connecting"></div>
+            <span>Connecting...</span>
+        </div>
+
         <div id="welcome-screen" class="screen active">
             <div class="welcome-box">
                 <h1>SHADOW HEIST</h1>
@@ -253,6 +259,77 @@
             
             if (roomParam) {
                 document.getElementById('room-code-input').value = roomParam;
+            }
+            
+            // Update connection status UI
+            const connectionStatus = document.getElementById('connection-status');
+            window.updateConnectionStatus = function(status) {
+                connectionStatus.className = 'connection-status ' + status;
+                const statusDot = connectionStatus.querySelector('.status-dot');
+                statusDot.className = 'status-dot ' + status;
+                
+                let statusText = '';
+                switch(status) {
+                    case 'connected':
+                        statusText = 'Connected';
+                        setTimeout(() => {
+                            connectionStatus.style.opacity = '0';
+                            setTimeout(() => {
+                                connectionStatus.style.display = 'none';
+                            }, 1000);
+                        }, 3000);
+                        break;
+                    case 'disconnected':
+                        connectionStatus.style.display = 'flex';
+                        connectionStatus.style.opacity = '1';
+                        statusText = 'Disconnected';
+                        break;
+                    case 'connecting':
+                        connectionStatus.style.display = 'flex';
+                        connectionStatus.style.opacity = '1';
+                        statusText = 'Connecting...';
+                        break;
+                }
+                connectionStatus.querySelector('span').textContent = statusText;
+            };
+            
+            // Add Emoji Picker to Chat (simplified version)
+            const chatInput = document.getElementById('chat-input');
+            if (chatInput) {
+                const emojis = ['👍', '👎', '😄', '😢', '😡', '🤔', '👀', '🙌', '🔥', '❓'];
+                
+                const emojiPicker = document.createElement('div');
+                emojiPicker.className = 'emoji-picker';
+                emojis.forEach(emoji => {
+                    const emojiBtn = document.createElement('button');
+                    emojiBtn.className = 'emoji-btn';
+                    emojiBtn.textContent = emoji;
+                    emojiBtn.addEventListener('click', () => {
+                        chatInput.value += emoji;
+                        chatInput.focus();
+                    });
+                    emojiPicker.appendChild(emojiBtn);
+                });
+                
+                // Add emoji toggle button
+                const emojiToggle = document.createElement('button');
+                emojiToggle.className = 'emoji-toggle';
+                emojiToggle.innerHTML = '<i class="fas fa-smile"></i>';
+                
+                const chatInputContainer = document.querySelector('.chat-input');
+                chatInputContainer.insertBefore(emojiToggle, chatInput);
+                chatInputContainer.appendChild(emojiPicker);
+                
+                emojiToggle.addEventListener('click', () => {
+                    emojiPicker.classList.toggle('active');
+                });
+                
+                // Close emoji picker when clicking outside
+                document.addEventListener('click', (e) => {
+                    if (!emojiPicker.contains(e.target) && e.target !== emojiToggle) {
+                        emojiPicker.classList.remove('active');
+                    }
+                });
             }
         });
     </script>
