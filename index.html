@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shadow Heist - Multiplayer Game</title>
+    <meta name="description" content="Shadow Heist - An immersive multiplayer social deduction game">
+    <meta name="theme-color" content="#2c3e50">
+    <link rel="icon" href="assets/favicon.ico">
+    <link rel="apple-touch-icon" href="assets/icon-192x192.png">
+    <link rel="manifest" href="manifest.json">
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;900&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <div id="welcome-screen" class="screen active">
+            <div class="welcome-box">
+                <h1>SHADOW HEIST</h1>
+                <p class="tagline">Trust no one. Complete the heist.</p>
+                
+                <div class="player-setup">
+                    <input type="text" id="player-name" placeholder="Enter your code name" maxlength="15">
+                    <div class="join-group">
+                        <input type="text" id="room-code-input" placeholder="Room code" maxlength="6">
+                        <button id="join-game-btn" class="btn primary-btn">JOIN GAME</button>
+                    </div>
+                </div>
+                
+                <div class="create-game-section">
+                    <button id="create-game-btn" class="btn secondary-btn">CREATE NEW HEIST</button>
+                </div>
+                
+                <div class="game-info-section">
+                    <button id="how-to-play-btn" class="btn text-btn"><i class="fas fa-question-circle"></i> How to play</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="lobby-screen" class="screen">
+            <div class="lobby-container">
+                <h2>HEIST PLANNING</h2>
+                <p class="room-code">Room Code: <span id="room-code">XXX</span></p>
+                
+                <div class="share-section">
+                    <p>Share with friends:</p>
+                    <button id="copy-link-btn" class="btn small-btn"><i class="fas fa-copy"></i> Copy Link</button>
+                </div>
+                
+                <div class="players-list">
+                    <h3>TEAM MEMBERS</h3>
+                    <ul id="players"></ul>
+                </div>
+                
+                <div class="lobby-controls">
+                    <button id="start-game-btn" class="btn primary-btn">START HEIST</button>
+                    <button id="leave-lobby-btn" class="btn danger-btn">LEAVE</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="game-screen" class="screen">
+            <div class="game-interface">
+                <div class="game-header">
+                    <div class="game-info">
+                        <div class="time-left">Time: <span id="time-counter">5:00</span></div>
+                        <div class="tasks-progress">
+                            Tasks: <span id="tasks-completed">0</span>/3
+                        </div>
+                        <div class="sabotage-counter">
+                            Sabotage: <span id="sabotage-counter">0</span>/3
+                        </div>
+                    </div>
+                    <div class="player-role">
+                        <span id="role-name">Role: Unknown</span>
+                    </div>
+                </div>
+                
+                <div class="main-game-area">
+                    <div class="game-map">
+                        <!-- Game map will be rendered here using JavaScript -->
+                    </div>
+                    
+                    <div class="task-area" id="task-container">
+                        <!-- Tasks will be loaded here dynamically -->
+                    </div>
+                </div>
+                
+                <div class="game-controls">
+                    <button id="use-ability-btn" class="ability-btn">USE ABILITY</button>
+                    <button id="report-btn" class="btn danger-btn">EMERGENCY MEETING</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="meeting-screen" class="screen">
+            <div class="meeting-container">
+                <h2>EMERGENCY MEETING</h2>
+                <div class="voting-area">
+                    <h3>VOTE TO BANISH</h3>
+                    <div id="voting-players" class="voting-players"></div>
+                    <div class="timer">Time left: <span id="voting-timer">30</span></div>
+                </div>
+                <div class="chat-container">
+                    <div id="chat-messages" class="chat-messages"></div>
+                    <div class="chat-input">
+                        <input type="text" id="chat-input" placeholder="Type your message...">
+                        <button id="send-chat-btn"><i class="fas fa-paper-plane"></i></button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="result-screen" class="screen">
+            <div class="result-container">
+                <h2 id="result-title">HEIST COMPLETE</h2>
+                <div id="result-message" class="result-message"></div>
+                <div class="roles-reveal">
+                    <h3>TEAM ROLES</h3>
+                    <div id="player-roles" class="player-roles"></div>
+                </div>
+                <div class="result-actions">
+                    <button id="play-again-btn" class="btn primary-btn">PLAY AGAIN</button>
+                    <button id="share-result-btn" class="btn secondary-btn"><i class="fas fa-share-alt"></i> Share</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal for abilities, tasks, and info -->
+    <div id="game-modal" class="modal">
+        <div class="modal-content">
+            <span class="close-modal">&times;</span>
+            <h3 id="modal-title">Task</h3>
+            <div id="modal-content"></div>
+        </div>
+    </div>
+
+    <!-- How to play modal -->
+    <div id="how-to-play-modal" class="modal">
+        <div class="modal-content">
+            <span class="close-how-to-play">&times;</span>
+            <h3>How to Play Shadow Heist</h3>
+            <div class="how-to-play-content">
+                <p class="modal-subtitle">The ultimate test of trust and deception</p>
+                
+                <div class="guide-section">
+                    <h4>Roles</h4>
+                    <ul>
+                        <li><strong>Master Thief (Hero)</strong> - Knows one innocent player. Can lockpick to remove sabotage.</li>
+                        <li><strong>Hacker (Hero)</strong> - Can scan players once to reveal their true alignment.</li>
+                        <li><strong>Infiltrator (Traitor)</strong> - Can sabotage tasks secretly. Can frame players.</li>
+                        <li><strong>Double Agent (Traitor)</strong> - Appears innocent in scans. Can fake task completion.</li>
+                        <li><strong>Civilian</strong> - Complete tasks to help win the heist.</li>
+                    </ul>
+                </div>
+                
+                <div class="guide-section">
+                    <h4>Game Phases</h4>
+                    <ul>
+                        <li><strong>Night Phase</strong> - 30 seconds for traitors to plan.</li>
+                        <li><strong>Day Phase</strong> - 2 minutes for discussion.</li>
+                        <li><strong>Task Phase</strong> - 90 seconds to complete or sabotage tasks.</li>
+                        <li><strong>Voting Phase</strong> - 45 seconds to vote on who to banish.</li>
+                    </ul>
+                </div>
+                
+                <div class="guide-section">
+                    <h4>Winning</h4>
+                    <ul>
+                        <li><strong>Heroes win</strong> when all tasks are completed or all traitors are banished.</li>
+                        <li><strong>Traitors win</strong> when enough tasks are sabotaged or they outnumber the heroes.</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Notification toast container -->
+    <div id="toast-container" class="toast-container"></div>
+
+    <!-- Scripts -->
+    <script src="https://cdn.socket.io/4.6.0/socket.io.min.js"></script>
+    <script src="js/game.js"></script>
+    <script src="js/tasks.js"></script>
+    <script src="js/ui.js"></script>
+    <script>
+        // Register service worker for PWA
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('/sw.js')
+                    .then(reg => console.log('Service Worker registered'))
+                    .catch(err => console.log('Service Worker not registered', err));
+            });
+        }
+        
+        // Initialize game on load
+        document.addEventListener('DOMContentLoaded', () => {
+            init();
+            
+            // How to play button
+            const howToPlayBtn = document.getElementById('how-to-play-btn');
+            const howToPlayModal = document.getElementById('how-to-play-modal');
+            const closeHowToPlay = document.querySelector('.close-how-to-play');
+            
+            howToPlayBtn.addEventListener('click', () => {
+                howToPlayModal.style.display = 'flex';
+            });
+            
+            closeHowToPlay.addEventListener('click', () => {
+                howToPlayModal.style.display = 'none';
+            });
+            
+            // Copy link button
+            const copyLinkBtn = document.getElementById('copy-link-btn');
+            
+            copyLinkBtn.addEventListener('click', () => {
+                const roomId = document.getElementById('room-code').textContent;
+                const url = `${window.location.origin}?room=${roomId}`;
+                
+                navigator.clipboard.writeText(url).then(() => {
+                    UI.showToast('Link copied to clipboard!', 'success');
+                }).catch(err => {
+                    console.error('Failed to copy: ', err);
+                });
+            });
+            
+            // Share result button
+            const shareResultBtn = document.getElementById('share-result-btn');
+            
+            shareResultBtn.addEventListener('click', () => {
+                const resultTitle = document.getElementById('result-title').textContent;
+                
+                if (navigator.share) {
+                    navigator.share({
+                        title: 'Shadow Heist',
+                        text: `I just finished a game of Shadow Heist: ${resultTitle}! Join me for another round!`,
+                        url: window.location.origin
+                    })
+                    .catch(err => {
+                        console.error('Share failed:', err);
+                    });
+                } else {
+                    UI.showToast('Sharing not supported on this browser', 'error');
+                }
+            });
+            
+            // Check URL for room code
+            const urlParams = new URLSearchParams(window.location.search);
+            const roomParam = urlParams.get('room');
+            
+            if (roomParam) {
+                document.getElementById('room-code-input').value = roomParam;
+            }
+        });
+    </script>
+</body>
+</html> 
